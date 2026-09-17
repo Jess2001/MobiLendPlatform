@@ -1,0 +1,13 @@
+# Local configuration and Python build artefacts
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Django-generated local artefacts
+staticfiles/
+media/
+
