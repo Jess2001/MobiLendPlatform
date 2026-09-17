@@ -1,47 +1,49 @@
-from django.contrib.auth import get_user_model
-from rest_framework import status
-from rest_framework.test import APITestCase
+import re
 
-from .models import CustomerProfile
+import pytest
 
-User = get_user_model()
+from apps.customers.factories import CustomerProfileFactory
+
+ME_URL = "/api/v1/customers/me/"
 
 
-class CustomerMeAPITests(APITestCase):
-    url = "/api/v1/customers/me/"
+@pytest.mark.django_db
+def test_requires_authentication(api_client):
+    response = api_client.get(ME_URL)
+    assert response.status_code == 401
 
-    def setUp(self):
-        self.user = User.objects.create_user(
-            email="amina@example.com", password="pw12345678", phone_number="+254712345678"
-        )
-        self.profile = CustomerProfile.objects.create(
-            user=self.user, first_name="Amina", last_name="Njeri",
-            phone_number="+254712345678", national_id="12345678",
-            monthly_income=80000, monthly_expenses=35000,
-        )
 
-    def test_requires_authentication(self):
-        self.assertEqual(self.client.get(self.url).status_code,
-                         status.HTTP_401_UNAUTHORIZED)
+@pytest.mark.django_db
+def test_returns_own_profile(api_client):
+    profile = CustomerProfileFactory()
+    api_client.force_authenticate(profile.user)
+    response = api_client.get(ME_URL)
+    assert response.status_code == 200
+    assert response.data["customer_number"] == profile.customer_number
 
-    def test_returns_own_profile(self):
-        self.client.force_authenticate(self.user)
-        response = self.client.get(self.url)
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["customer_number"],
-                         self.profile.customer_number)
 
-    def test_does_not_leak_sensitive_fields(self):
-        """Doc §3.2 — least privilege."""
-        self.client.force_authenticate(self.user)
-        data = self.client.get(self.url).data
-        for field in ("national_id", "monthly_income", "monthly_expenses",
-                      "date_of_birth"):
-            self.assertNotIn(field, data)
+@pytest.mark.django_db
+def test_does_not_leak_sensitive_fields(api_client):
+    profile = CustomerProfileFactory(
+        national_id="12345678",
+        monthly_income=80000,
+        monthly_expenses=35000,
+    )
+    api_client.force_authenticate(profile.user)
+    data = api_client.get(ME_URL).data
+    for field in (
+        "national_id",
+        "monthly_income",
+        "monthly_expenses",
+        "date_of_birth",
+    ):
+        assert field not in data
 
-    def test_customer_number_is_generated_and_unique(self):
-        other = User.objects.create_user(email="b@example.com", password="pw12345678")
-        p2 = CustomerProfile.objects.create(user=other, first_name="B", last_name="O",
-                                            phone_number="+254700000001")
-        self.assertNotEqual(self.profile.customer_number, p2.customer_number)
-        self.assertEqual(p2.customer_number, f"CUS-{p2.created_at.year}-00002")
+
+@pytest.mark.django_db
+def test_customer_number_is_generated_and_unique():
+    p1 = CustomerProfileFactory()
+    p2 = CustomerProfileFactory()
+    assert p1.customer_number != p2.customer_number
+    assert re.match(r"^CUS-\d{4}-\d{5}$", p1.customer_number)
+    assert re.match(r"^CUS-\d{4}-\d{5}$", p2.customer_number)

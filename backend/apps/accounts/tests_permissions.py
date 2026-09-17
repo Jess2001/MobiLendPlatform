@@ -1,36 +1,42 @@
-from django.contrib.auth import get_user_model
-from django.test import RequestFactory, TestCase
+import pytest
+from django.test import RequestFactory
 
-
+from apps.accounts.factories import UserFactory
 from apps.accounts.models import Role
 from apps.accounts.permissions import IsCreditOfficer, IsOperationsOrFinance
 
-User = get_user_model()
+
+@pytest.fixture
+def rf():
+    return RequestFactory()
 
 
-class RolePermissionTests(TestCase):
-    def setUp(self):
-        self.factory = RequestFactory()
+def _request_for(rf, role):
+    user = UserFactory(role=role)
+    request = rf.get("/")
+    request.user = user
+    return request
 
-    def _request_for(self, role):
-        user = User.objects.create_user(email=f"{role}@x.com", password="pw12345678",
-                                        role=role)
-        request = self.factory.get("/")
-        request.user = user
-        return request
 
-    def test_customer_cannot_pass_credit_officer_gate(self):
-        self.assertFalse(IsCreditOfficer().has_permission(
-            self._request_for(Role.CUSTOMER), None))
+@pytest.mark.django_db
+def test_customer_cannot_pass_credit_officer_gate(rf):
+    request = _request_for(rf, Role.CUSTOMER)
+    assert IsCreditOfficer().has_permission(request, None) is False
 
-    def test_credit_officer_passes(self):
-        self.assertTrue(IsCreditOfficer().has_permission(
-            self._request_for(Role.CREDIT_OFFICER), None))
 
-    def test_operations_passes_composite_gate(self):
-        self.assertTrue(IsOperationsOrFinance().has_permission(
-            self._request_for(Role.OPERATIONS), None))
+@pytest.mark.django_db
+def test_credit_officer_passes(rf):
+    request = _request_for(rf, Role.CREDIT_OFFICER)
+    assert IsCreditOfficer().has_permission(request, None) is True
 
-    def test_credit_officer_fails_composite_gate(self):
-        self.assertFalse(IsOperationsOrFinance().has_permission(
-            self._request_for(Role.CREDIT_OFFICER), None))
+
+@pytest.mark.django_db
+def test_operations_passes_composite_gate(rf):
+    request = _request_for(rf, Role.OPERATIONS)
+    assert IsOperationsOrFinance().has_permission(request, None) is True
+
+
+@pytest.mark.django_db
+def test_credit_officer_fails_composite_gate(rf):
+    request = _request_for(rf, Role.CREDIT_OFFICER)
+    assert IsOperationsOrFinance().has_permission(request, None) is False
