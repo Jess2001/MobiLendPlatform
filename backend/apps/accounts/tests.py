@@ -439,3 +439,35 @@ def test_login_with_inactive_user_fails(api_client):
     )
     assert response.status_code == 401
     assert response.data["reason"] == "account_inactive"
+
+
+@pytest.mark.django_db
+def test_resend_issues_new_code_and_invalidates_old(api_client):
+    user = UserFactory()
+    old_code, _old_raw = VerificationCode.issue(
+        user=user,
+        purpose=VerificationCodePurpose.ACCOUNT_VERIFY,
+        channel=VerificationCodeChannel.SMS,
+    )
+    api_client.force_authenticate(user)
+    response = api_client.post("/api/v1/auth/verify/resend/", format="json")
+    assert response.status_code == 200
+    old_code.refresh_from_db()
+    assert old_code.used_at is not None  # invalidated
+    assert (
+        VerificationCode.objects.filter(
+            user=user,
+            purpose=VerificationCodePurpose.ACCOUNT_VERIFY,
+            used_at__isnull=True,
+        ).count()
+        == 1
+    )
+
+
+@pytest.mark.django_db
+def test_resend_rejected_when_already_verified(api_client):
+    user = UserFactory(is_verified=True)
+    api_client.force_authenticate(user)
+    response = api_client.post("/api/v1/auth/verify/resend/", format="json")
+    assert response.status_code == 400
+    assert response.data["reason"] == "already_verified"

@@ -210,3 +210,37 @@ class LoginView(generics.GenericAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         return Response(serializer.validated_data)
+
+
+class ResendVerificationView(generics.GenericAPIView):
+    """
+    Issue a fresh ACCOUNT_VERIFY code for the authenticated user.
+    Invalidates any previous unused code (VerificationCode.issue handles it).
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        user = request.user
+
+        if user.is_verified:
+            return Response(
+                {
+                    "detail": "Account is already verified.",
+                    "reason": "already_verified",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        channel = (
+            VerificationCodeChannel.SMS
+            if user.phone_number
+            else VerificationCodeChannel.EMAIL
+        )
+        code, raw = VerificationCode.issue(
+            user=user,
+            purpose=VerificationCodePurpose.ACCOUNT_VERIFY,
+            channel=channel,
+        )
+        send_otp(user, raw, channel=code.channel, purpose=code.purpose)
+        return Response({"detail": "A new code has been sent."})
