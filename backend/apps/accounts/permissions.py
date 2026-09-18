@@ -50,3 +50,23 @@ class IsInternalStaff(HasRole):
         Role.PARTNER_ADMIN, Role.CREDIT_OFFICER,
         Role.OPERATIONS, Role.FINANCE, Role.SUPERADMIN,
     )
+
+
+class IsVerifiedUser(BasePermission):
+    """
+    Requires the user to have completed account verification (is_verified=True).
+
+    Deliberately NOT the default permission class — auth endpoints like /verify/
+    and /password/forgot/ must remain reachable for unverified users.
+    Attach this explicitly to domain endpoints (loans, applications, repayments).
+    """
+
+    message = "Account verification required."
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not (user and user.is_authenticated and user.is_active):
+            return False
+        if user.is_superuser:
+            return True
+        return bool(getattr(user, "is_verified", False))
