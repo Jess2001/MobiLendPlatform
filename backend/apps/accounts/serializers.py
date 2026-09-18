@@ -12,6 +12,11 @@ from .models import (
 )
 from .otp import send_otp
 from django.contrib.auth.password_validation import validate_password
+from django.contrib.auth import get_user_model
+from rest_framework.exceptions import AuthenticationFailed
+from rest_framework_simplejwt.tokens import RefreshToken
+
+from apps.accounts.identifiers import resolve_identifier
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
@@ -119,3 +124,55 @@ class ResetPasswordSerializer(serializers.Serializer):
     def validate_new_password(self, value):
         validate_password(value)
         return value
+
+
+class LoginSerializer(serializers.Serializer):
+    """
+    Log in with email OR phone number.
+
+    Deliberately returns the same error for "no such user" and "wrong password"
+    so a caller can't enumerate accounts. The password-hash work still runs in
+    the no-such-user branch to prevent timing-based enumeration.
+    """
+
+    email_or_phone = serializers.CharField(write_only=True)
+    password = serializers.CharField(write_only=True, style={"input_type": "password"})
+
+    def validate(self, attrs):
+        User = get_user_model()
+        user = resolve_identifier(attrs["email_or_phone"])
+
+        if user is None:
+            # Same hashing cost as a real check — timing-safe.
+            User().set_password(attrs["password"])
+            raise AuthenticationFailed(
+                {
+                    "detail": "Email/phone number or password is incorrect.",
+                    "reason": "invalid_credentials",
+                }
+            )
+
+        if not user.check_password(attrs["password"]):
+            raise AuthenticationFailed(
+                {
+                    "detail": "Email/phone number or password is incorrect.",
+                    "reason": "invalid_credentials",
+                }
+            )
+
+        if not user.is_active:
+            raise AuthenticationFailed(
+                {
+                    "detail": "Your account is currently unavailable. Please contact support.",
+                    "reason": "account_inactive",
+                }
+            )
+
+        refresh = RefreshToken.for_user(user)
+        return {
+            "user": UserSerializer(user).data,
+            "tokens": {
+                "access": str(refresh.access_token),
+                "refresh": str(refresh),
+            },
+        }

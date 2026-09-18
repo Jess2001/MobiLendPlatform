@@ -1,11 +1,6 @@
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
-from apps.accounts.serializers import (
-    RegisterSerializer,
-    UserSerializer,
-    VerifySerializer,
-)
 from apps.accounts.identifiers import resolve_identifier
 from apps.accounts.models import (
     VerificationCode,
@@ -18,6 +13,7 @@ from apps.accounts.serializers import (
     ResetPasswordSerializer,
     UserSerializer,
     VerifySerializer,
+    LoginSerializer,
 )
 from django.contrib.auth import get_user_model
 from apps.accounts.otp import send_otp
@@ -198,3 +194,19 @@ class ResetPasswordView(generics.GenericAPIView):
         user.save(update_fields=["password"])
 
         return Response({"detail": "Password updated."})
+
+
+class LoginView(generics.GenericAPIView):
+    """
+    POST /api/v1/auth/login/
+    Body: {"email_or_phone": "...", "password": "..."}
+    Returns: {"user": {...}, "tokens": {"access": "...", "refresh": "..."}}
+    """
+
+    serializer_class = LoginSerializer
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response(serializer.validated_data)

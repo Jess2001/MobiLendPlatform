@@ -359,3 +359,83 @@ def test_superuser_bypasses_isverified_gate():
     request = RequestFactory().get("/")
     request.user = user
     assert IsVerifiedUser().has_permission(request, None) is True
+
+
+# ---------------------------------------------------------------------
+# Login API
+# ---------------------------------------------------------------------
+
+LOGIN_URL = "/api/v1/auth/login/"
+
+
+@pytest.mark.django_db
+def test_login_with_email_returns_tokens_and_user(api_client):
+    UserFactory(email="test@example.com", phone_number="+254700000001")
+    response = api_client.post(
+        LOGIN_URL,
+        {"email_or_phone": "test@example.com", "password": "Str0ngPass!23"},
+        format="json",
+    )
+    assert response.status_code == 200
+    assert "tokens" in response.data
+    assert "access" in response.data["tokens"]
+    assert "refresh" in response.data["tokens"]
+    assert response.data["user"]["email"] == "test@example.com"
+
+
+@pytest.mark.django_db
+def test_login_with_phone_returns_tokens(api_client):
+    UserFactory(email="test@example.com", phone_number="+254700000001")
+    response = api_client.post(
+        LOGIN_URL,
+        {"email_or_phone": "+254700000001", "password": "Str0ngPass!23"},
+        format="json",
+    )
+    assert response.status_code == 200
+    assert "tokens" in response.data
+
+
+@pytest.mark.django_db
+def test_login_with_email_is_case_insensitive(api_client):
+    UserFactory(email="test@example.com", phone_number="+254700000001")
+    response = api_client.post(
+        LOGIN_URL,
+        {"email_or_phone": "TEST@example.com", "password": "Str0ngPass!23"},
+        format="json",
+    )
+    assert response.status_code == 200
+
+
+@pytest.mark.django_db
+def test_login_with_wrong_password_fails(api_client):
+    UserFactory(email="test@example.com")
+    response = api_client.post(
+        LOGIN_URL,
+        {"email_or_phone": "test@example.com", "password": "WrongPass!23"},
+        format="json",
+    )
+    assert response.status_code == 401
+    assert response.data["reason"] == "invalid_credentials"
+
+
+@pytest.mark.django_db
+def test_login_with_unknown_identifier_returns_same_error(api_client):
+    response = api_client.post(
+        LOGIN_URL,
+        {"email_or_phone": "nobody@example.com", "password": "Str0ngPass!23"},
+        format="json",
+    )
+    assert response.status_code == 401
+    assert response.data["reason"] == "invalid_credentials"
+
+
+@pytest.mark.django_db
+def test_login_with_inactive_user_fails(api_client):
+    UserFactory(email="test@example.com", is_active=False)
+    response = api_client.post(
+        LOGIN_URL,
+        {"email_or_phone": "test@example.com", "password": "Str0ngPass!23"},
+        format="json",
+    )
+    assert response.status_code == 401
+    assert response.data["reason"] == "account_inactive"
