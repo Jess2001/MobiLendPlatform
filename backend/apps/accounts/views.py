@@ -46,8 +46,15 @@ class RegisterView(generics.CreateAPIView):
 class MeView(generics.RetrieveAPIView):
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated]
-    throttle_classes = [ScopedRateThrottle]
-    throttle_scope = "auth_login"
+    
+
+    @extend_schema(
+        tags=["auth"],
+        summary="Get the current authenticated user",
+        responses={200: UserSerializer},
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
 
     def get_object(self):
         return self.request.user
