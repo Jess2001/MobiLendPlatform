@@ -148,8 +148,24 @@ REST_FRAMEWORK = {
     ),
     # Fail-closed: any new endpoint is locked unless it explicitly opts into AllowAny.
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
+    "EXCEPTION_HANDLER": "apps.core.exceptions.mobilend_exception_handler",
+    "DEFAULT_THROTTLE_RATES": {
+        "auth_login": "5/min",
+        "auth_verify": "10/min",
+        "auth_verify_resend": "3/min",
+        "auth_password_forgot": "3/min",
+    },
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
+}
+# Throttling counters live here.
+# LocMemCache is per-process — fine for dev and tests.
+# Switch to Redis when we have more than one api container (Day 11).
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "mobilend-throttle",
+    }
 }
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
