@@ -471,3 +471,59 @@ def test_resend_rejected_when_already_verified(api_client):
     response = api_client.post("/api/v1/auth/verify/resend/", format="json")
     assert response.status_code == 400
     assert response.data["reason"] == "already_verified"
+
+# ---------------------------------------------------------------------
+# Rate limiting
+# ---------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_login_is_rate_limited(api_client):
+    UserFactory(email="test@example.com")
+    payload = {"email_or_phone": "test@example.com", "password": "WrongPass!23"}
+
+    # Budget is 5/min — consume it.
+    for _ in range(5):
+        api_client.post(LOGIN_URL, payload, format="json")
+
+    response = api_client.post(LOGIN_URL, payload, format="json")
+    assert response.status_code == 429
+    assert response.data["reason"] == "too_many_attempts"
+
+
+@pytest.mark.django_db
+def test_verify_resend_is_rate_limited(api_client):
+    user = UserFactory()
+    api_client.force_authenticate(user)
+    url = "/api/v1/auth/verify/resend/"
+
+    for _ in range(3):
+        api_client.post(url, format="json")
+
+    response = api_client.post(url, format="json")
+    assert response.status_code == 429
+    assert response.data["reason"] == "too_many_attempts"
+
+
+@pytest.mark.django_db
+def test_password_forgot_is_rate_limited(api_client):
+    payload = {"email_or_phone": "nobody@example.com"}
+
+    for _ in range(3):
+        api_client.post(FORGOT_URL, payload, format="json")
+
+    response = api_client.post(FORGOT_URL, payload, format="json")
+    assert response.status_code == 429
+    assert response.data["reason"] == "too_many_attempts"
+
+
+@pytest.mark.django_db
+def test_throttle_returns_retry_after(api_client):
+    UserFactory(email="test@example.com")
+    payload = {"email_or_phone": "test@example.com", "password": "WrongPass!23"}
+    for _ in range(5):
+        api_client.post(LOGIN_URL, payload, format="json")
+    response = api_client.post(LOGIN_URL, payload, format="json")
+    assert response.status_code == 429
+    assert response.data["retry_after_seconds"] is not None
+    assert response.data["retry_after_seconds"] > 0

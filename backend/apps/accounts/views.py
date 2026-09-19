@@ -17,6 +17,7 @@ from apps.accounts.serializers import (
 )
 from django.contrib.auth import get_user_model
 from apps.accounts.otp import send_otp
+from rest_framework.throttling import ScopedRateThrottle
 
 def _tokens_for(user):
     """Issue a JWT access/refresh pair for a user."""
@@ -27,6 +28,7 @@ def _tokens_for(user):
 class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
     permission_classes = [permissions.AllowAny]
+   
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -44,6 +46,8 @@ class RegisterView(generics.CreateAPIView):
 class MeView(generics.RetrieveAPIView):
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth_login"
 
     def get_object(self):
         return self.request.user
@@ -57,6 +61,8 @@ class VerifyAccountView(generics.GenericAPIView):
 
     serializer_class = VerifySerializer
     permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth_verify"
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -122,6 +128,8 @@ class ForgotPasswordView(generics.GenericAPIView):
 
     serializer_class = ForgotPasswordSerializer
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth_password_forgot"
 
     _NEUTRAL_RESPONSE = {
         "detail": "If an account matches, we've sent reset instructions."
@@ -157,6 +165,7 @@ class ResetPasswordView(generics.GenericAPIView):
 
     serializer_class = ResetPasswordSerializer
     permission_classes = [permissions.AllowAny]
+    
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -205,6 +214,8 @@ class LoginView(generics.GenericAPIView):
 
     serializer_class = LoginSerializer
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth_login"
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -219,6 +230,8 @@ class ResendVerificationView(generics.GenericAPIView):
     """
 
     permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth_verify_resend"
 
     def post(self, request, *args, **kwargs):
         user = request.user
