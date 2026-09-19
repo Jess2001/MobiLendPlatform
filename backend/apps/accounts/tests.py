@@ -527,3 +527,14 @@ def test_throttle_returns_retry_after(api_client):
     assert response.status_code == 429
     assert response.data["retry_after_seconds"] is not None
     assert response.data["retry_after_seconds"] > 0
+
+@pytest.mark.django_db
+def test_me_is_not_throttled_by_login_scope(api_client):
+   user = UserFactory()
+   api_client.force_authenticate(user)
+   #call the me endpoint 10 times to ensure it is not throttled
+   for _ in range(10):
+         response = api_client.get("/api/v1/auth/me/")
+         status_code = response.status_code
+         assert status_code == 200, f"Expected 200, got {status_code}"
+         

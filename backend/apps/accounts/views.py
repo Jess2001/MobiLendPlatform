@@ -18,6 +18,16 @@ from apps.accounts.serializers import (
 from django.contrib.auth import get_user_model
 from apps.accounts.otp import send_otp
 from rest_framework.throttling import ScopedRateThrottle
+from apps.core.schemas import (
+    ErrorResponse,
+    TokenPair,
+    ValidationErrorResponse,
+)
+from drf_spectacular.utils import (
+    OpenApiResponse,
+    extend_schema,
+    inline_serializer,
+)
 
 def _tokens_for(user):
     """Issue a JWT access/refresh pair for a user."""
@@ -28,7 +38,27 @@ def _tokens_for(user):
 class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
     permission_classes = [permissions.AllowAny]
-   
+
+    @extend_schema(
+        tags=["auth"],
+        summary="Register a new customer",
+        description=(
+            "Creates a User, a CustomerProfile, and an ACCOUNT_VERIFY OTP "
+            "in a single atomic transaction. Returns JWT tokens so the client "
+            "can immediately call /auth/verify/."
+        ),
+        request=RegisterSerializer,
+        responses={
+            201: inline_serializer(
+                name="RegisterResponse",
+                fields={
+                    "user": UserSerializer(),
+                    "tokens": TokenPair,
+                },
+            ),
+            400: ValidationErrorResponse,
+        },
+    )
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -70,6 +100,24 @@ class VerifyAccountView(generics.GenericAPIView):
     permission_classes = [permissions.IsAuthenticated]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "auth_verify"
+
+    @extend_schema(
+        tags=["auth"],
+        summary="Submit OTP for account verification",
+        description=(
+            "Requires an authenticated user. Submits the 6-digit ACCOUNT_VERIFY code. "
+            "On success, sets `is_verified=True`. Throttled at 10 requests/minute."
+        ),
+        request=VerifySerializer,
+        responses={
+            200: OpenApiResponse(description="Account verified."),
+            400: OpenApiResponse(
+                response=ErrorResponse,
+                description="wrong_code, expired, used, too_many_attempts, or already_verified",
+            ),
+            429: OpenApiResponse(response=ErrorResponse),
+        },
+    )
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -142,6 +190,21 @@ class ForgotPasswordView(generics.GenericAPIView):
         "detail": "If an account matches, we've sent reset instructions."
     }
 
+    @extend_schema(
+        tags=["auth"],
+        summary="Request password reset",
+        description=(
+            "Always returns 200 with the same body, whether or not the identifier "
+            "matches an account — this prevents enumeration. Issues a PASSWORD_RESET "
+            "OTP if the account exists. Throttled at 3 requests/minute."
+        ),
+        request=ForgotPasswordSerializer,
+        responses={
+            200: OpenApiResponse(description="Neutral confirmation."),
+            429: OpenApiResponse(response=ErrorResponse),
+        },
+    )
+
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -172,7 +235,23 @@ class ResetPasswordView(generics.GenericAPIView):
 
     serializer_class = ResetPasswordSerializer
     permission_classes = [permissions.AllowAny]
-    
+
+    @extend_schema(
+        tags=["auth"],
+        summary="Reset password with OTP",
+        description=(
+            "Verifies a PASSWORD_RESET code and sets a new password. Returns the "
+            "same 400 body for unknown identifier and wrong code — no enumeration."
+        ),
+        request=ResetPasswordSerializer,
+        responses={
+            200: OpenApiResponse(description="Password updated."),
+            400: OpenApiResponse(
+                response=ErrorResponse,
+                description="invalid_or_expired",
+            ),
+        },
+    )
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -224,6 +303,34 @@ class LoginView(generics.GenericAPIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "auth_login"
 
+    @extend_schema(
+        tags=["auth"],
+        summary="Log in with email or phone",
+        description=(
+            "Accepts `email_or_phone` and `password`. Returns JWT tokens on success. "
+            "Returns an identical 401 for unknown identifier and wrong password to "
+            "prevent account enumeration. Throttled at 5 requests/minute per IP."
+        ),
+        request=LoginSerializer,
+        responses={
+            200: inline_serializer(
+                name="LoginResponse",
+                fields={
+                    "user": UserSerializer(),
+                    "tokens": TokenPair,
+                },
+            ),
+            401: OpenApiResponse(
+                response=ErrorResponse,
+                description="invalid_credentials or account_inactive",
+            ),
+            429: OpenApiResponse(
+                response=ErrorResponse,
+                description="too_many_attempts",
+            ),
+        },
+    )
+
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -239,6 +346,25 @@ class ResendVerificationView(generics.GenericAPIView):
     permission_classes = [permissions.IsAuthenticated]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "auth_verify_resend"
+
+    @extend_schema(
+        tags=["auth"],
+        summary="Resend account verification OTP",
+        description=(
+            "Issues a fresh ACCOUNT_VERIFY code for the authenticated user. "
+            "Any previously-issued unused code is invalidated. "
+            "Throttled at 3 requests/minute."
+        ),
+        request=None,
+        responses={
+            200: OpenApiResponse(description="A new code has been sent."),
+            400: OpenApiResponse(
+                response=ErrorResponse,
+                description="already_verified",
+            ),
+            429: OpenApiResponse(response=ErrorResponse),
+        },
+    )
 
     def post(self, request, *args, **kwargs):
         user = request.user
