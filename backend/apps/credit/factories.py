@@ -1,7 +1,7 @@
 import factory
-from .models import LoanProduct,LoanProductTerm
+from .models import LoanProduct, LoanProductTerm, LoanApplication
 from decimal import Decimal
-
+from apps.customers.factories import CustomerProfileFactory
 class LoanProductFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = LoanProduct
@@ -20,3 +20,13 @@ class LoanProductTermFactory(factory.django.DjangoModelFactory):
     loan_product = factory.SubFactory(LoanProductFactory)
     term_in_months = factory.Sequence(lambda n: n + 1)
     annual_interest_rate = Decimal("20.00")
+
+class LoanApplicationFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = LoanApplication
+
+    loan_product = factory.SubFactory(LoanProductFactory)
+    customer_profile = factory.SubFactory(CustomerProfileFactory)
+    term_in_months = 12
+    requested_amount = Decimal("50000.00")
+    

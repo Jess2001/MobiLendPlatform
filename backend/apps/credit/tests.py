@@ -1,8 +1,15 @@
 from django.test import TestCase
 import pytest
-from .factories import LoanProductFactory, LoanProductTermFactory
+from .factories import (
+    LoanProductFactory,
+    LoanProductTermFactory,
+    LoanApplicationFactory,
+)
+from django.utils import timezone
+import re
 # Create your tests here.
 from django.db import IntegrityError, transaction
+from .services import InvalidTransition, transition
 from decimal import Decimal
 @pytest.mark.django_db
 def test_a_valid_produt_can_be_created():
@@ -33,7 +40,6 @@ def test_fee_rate_outside_0_to_100_is_rejected(bad_rate):
           transaction.atomic():
         LoanProductFactory(processing_fee_rate=bad_rate)
 
-    
 
 @pytest.mark.django_db
 def test_zero_processing_fee_rate_is_valid():
@@ -71,7 +77,7 @@ def test_annual_rate_0_or_100_is_valid(valid_rate):
     # Test that creating a term with annual_interest_rate  0 or 100 is valid
     term = LoanProductTermFactory(loan_product=product, annual_interest_rate=valid_rate)
     assert term.pk is not None
-    
+
 @pytest.mark.django_db
 @pytest.mark.parametrize("bad_rate", [-1, 101, Decimal("-0.01"), Decimal("100.01")])
 def test_annual_rate_outside_0_to_100_rejected(bad_rate):
@@ -88,3 +94,108 @@ def test_product_term_month_constraints():
     with pytest.raises(IntegrityError, match="loanproductterm_term_in_months_positive"),\
             transaction.atomic():
         LoanProductTermFactory(loan_product=product, term_in_months=0)
+
+@pytest.mark.django_db
+def test_requested_amount_greater_than_zero():
+    product = LoanProductFactory()
+    # Test that creating a loan application with requested_amount <= 0 raises an error
+    with pytest.raises(IntegrityError, match="loanapplication_requested_amount_positive")\
+            , transaction.atomic():
+        LoanApplicationFactory(loan_product=product, requested_amount=Decimal("0"))
+
+@pytest.mark.django_db
+def test_default_status_is_draft():
+    product = LoanProductFactory()
+    application = LoanApplicationFactory(loan_product=product)
+    assert application.status == "DRAFT"
+
+
+@pytest.mark.django_db
+def test_application_numbers_are_generated_and_sequential():
+    first = LoanApplicationFactory()
+    second = LoanApplicationFactory()
+
+    year = timezone.now().year
+    assert re.fullmatch(rf"APP-{year}-\d{{5}}", first.application_number)
+    first_seq = int(first.application_number.split("-")[-1])
+    second_seq = int(second.application_number.split("-")[-1])
+    assert second_seq == first_seq + 1
+
+
+@pytest.mark.django_db
+def test_submitted_at_is_empty_until_submission():
+    application = LoanApplicationFactory()
+    assert application.submitted_at is None
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("new_status",["SUBMITTED", "CANCELLED", "EXPIRED"])
+def test_draft_transitions_work(new_status):
+    application = LoanApplicationFactory()
+    transition(application.id, new_status)
+    application.refresh_from_db()
+    assert application.status == new_status
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("new_status",["UNDER_REVIEW", "CANCELLED", "EXPIRED"])
+def test_submitted_transitions_work(new_status):
+    application = LoanApplicationFactory(status="SUBMITTED")
+    transition(application.id, new_status)
+    application.refresh_from_db()
+    assert application.status == new_status
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "new_status",["MORE_INFORMATION_REQUIRED", "APPROVED", "DECLINED", "EXPIRED"]
+)
+def test_under_review_transitions_work(new_status):
+    application = LoanApplicationFactory(status="UNDER_REVIEW")
+    transition(application.id, new_status)
+    application.refresh_from_db()
+    assert application.status == new_status
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("new_status",["UNDER_REVIEW", "CANCELLED", "EXPIRED"])
+def test_more_info_transitions_work(new_status):
+    application = LoanApplicationFactory(status="MORE_INFORMATION_REQUIRED")
+    transition(application.id, new_status)
+    application.refresh_from_db()
+    assert application.status == new_status
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("new_status",["LOAN_CREATED", "EXPIRED"])
+def test_approved_transitions_work(new_status):
+    application = LoanApplicationFactory(status="APPROVED")
+    transition(application.id, new_status)
+    application.refresh_from_db()
+    assert application.status == new_status
+
+
+@pytest.mark.django_db
+def test_submitted_transitions_has_submitted_at():
+    application = LoanApplicationFactory()
+    transition(application.id, "SUBMITTED")
+    application.refresh_from_db()
+    assert application.submitted_at is not None 
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "current_status,new_status",
+    [
+        ("DRAFT", "APPROVED"),
+        ("DECLINED", "APPROVED"),
+        ("APPROVED", "DECLINED"),
+        ("LOAN_CREATED", "DRAFT"),
+    ],
+)
+def test_invalid_transitions_fail(current_status, new_status):
+    application = LoanApplicationFactory(status=current_status)
+    with pytest.raises(InvalidTransition):
+        transition(application.id, new_status)
+    application.refresh_from_db()
+    assert application.status == current_status
